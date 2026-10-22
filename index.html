@@ -347,6 +347,8 @@
     let raycasterVR;
     let vrUI = [];
     let vrThrowCooldown = 0;
+    let pedestalMesh = null;
+    let vrHeightCalibrated = false;
     let vrHandMode = false; // Questの実ハンドトラッキングを優先
     const VR_HAND_POT_SCALE = 0.19;
     const VR_HAND_HOLD_OFFSET = new THREE.Vector3(0, -0.055, -0.115);
@@ -836,11 +838,14 @@
 
       renderer.xr.addEventListener('sessionstart', () => {
         cameraGroup.position.copy(VR_RIG_POS); cameraGroup.rotation.set(0, 0, 0);
+        if (pedestalMesh) pedestalMesh.visible = false; // ブラウザ用の鉢置き台はVRでは視界の邪魔になるので隠す
+        vrHeightCalibrated = false;
         throwTrackers.hand = createThrowTracker(); throwTrackers.controller = createThrowTracker();
         if (readyPot && readyPot.mesh) readyPot.spawnProgress = 0;
       });
       renderer.xr.addEventListener('sessionend', () => {
         cameraGroup.position.set(0, 0, 0); cameraGroup.rotation.set(0, 0, 0);
+        if (pedestalMesh) pedestalMesh.visible = true;
         if (readyPot && readyPot.mesh) { readyPot.mesh.position.copy(readyPot.initialPos); readyPot.mesh.quaternion.identity(); readyPot.mesh.scale.setScalar(1); }
         updateCameraPositionImmediate();
       });
@@ -1137,10 +1142,21 @@
       }
     }
 
+    // 床の高さが取れない環境（座ってプレイ・床未設定など）でも目線が低くなりすぎないよう補正
+    function calibrateVRHeight(frame) {
+      if (vrHeightCalibrated || !frame) return;
+      const pose = frame.getViewerPose(renderer.xr.getReferenceSpace());
+      if (!pose) return;
+      const headY = pose.transform.position.y;
+      cameraGroup.position.y = VR_RIG_POS.y + (headY < 1.1 ? 1.55 - headY : 0);
+      vrHeightCalibrated = true;
+    }
+
     function updateVRControllers(dt, frame, nowMs) {
       if (!renderer.xr.isPresenting) return;
       if (vrThrowCooldown > 0) vrThrowCooldown -= dt;
       const now = nowMs / 1000;
+      calibrateVRHeight(frame);
       cameraGroup.updateMatrixWorld(true);
 
       // ハンドトラッキング優先（右手 → いなければ左手）
@@ -1219,7 +1235,7 @@
       const floor = new THREE.Mesh(new THREE.PlaneGeometry(28, 40), new THREE.MeshStandardMaterial({ map: generateFloorTexture(), roughness: 0.38, metalness: 0.25 }));
       floor.rotation.x = -Math.PI / 2; floor.position.set(0, ARENA.floorY, 0); floor.receiveShadow = true; scene.add(floor);
 
-      const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.9, 1.3, 32), new THREE.MeshStandardMaterial({ color: 0x181a1f, roughness: 0.6, metalness: 0.3 }));
+      const pedestal = pedestalMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.9, 1.3, 32), new THREE.MeshStandardMaterial({ color: 0x181a1f, roughness: 0.6, metalness: 0.3 }));
       pedestal.position.set(ARENA.readyPos.x, ARENA.floorY + 0.65, ARENA.readyPos.z); pedestal.castShadow = true; pedestal.receiveShadow = true; scene.add(pedestal);
     }
 
